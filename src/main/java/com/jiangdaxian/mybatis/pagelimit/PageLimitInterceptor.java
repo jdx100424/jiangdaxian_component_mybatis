@@ -2,8 +2,17 @@ package com.jiangdaxian.mybatis.pagelimit;
 
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.ibatis.executor.statement.StatementHandler;
@@ -22,6 +31,7 @@ import org.apache.ibatis.reflection.factory.DefaultObjectFactory;
 import org.apache.ibatis.reflection.factory.ObjectFactory;
 import org.apache.ibatis.reflection.wrapper.DefaultObjectWrapperFactory;
 import org.apache.ibatis.reflection.wrapper.ObjectWrapperFactory;
+import org.apache.ibatis.scripting.defaults.DefaultParameterHandler;
 import org.apache.ibatis.session.RowBounds;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,21 +53,37 @@ public class PageLimitInterceptor implements Interceptor {
 	String dialectClass;
 	boolean asyncTotalCount = false;
 
-	public Object intercept(Invocation invocation) throws Throwable {
+	public Object intercept(Invocation invocation) throws Exception {
 		StatementHandler statementHandler = (StatementHandler) invocation.getTarget();
 		MetaObject metaStatementHandler = MetaObject.forObject(statementHandler, DEFAULT_OBJECT_FACTORY,
 				DEFAULT_OBJECT_WRAPPER_FACTORY,DEFAULT_REFLECTOR_FACTORY);
 		String originalSql = (String) metaStatementHandler.getValue("delegate.boundSql.sql");
 		BoundSql boundSql = (BoundSql) metaStatementHandler.getValue("delegate.boundSql");	
-		
+
 		if (StringUtils.isNotBlank(originalSql)) {
+			//先把最后面的分号去掉
+			while(true) {
+				if(originalSql.lastIndexOf(";")>-1) {
+					originalSql = originalSql.substring(0, originalSql.length()-1);
+				}else {
+					break;
+				}
+			}
+			//修改SqlBound
 			MappedStatement mappedStatement = (MappedStatement) metaStatementHandler.getValue("delegate.mappedStatement");
 			if(mappedStatement.getSqlCommandType().equals(SqlCommandType.SELECT)==true){
 				RowBounds rowBounds = (RowBounds) metaStatementHandler.getValue("delegate.rowBounds");
+				PageLimitBounds pageLimitBounds = null;
+				if(rowBounds!=null && rowBounds instanceof PageLimitBounds) {
+					pageLimitBounds = (PageLimitBounds) rowBounds;
+				}
+
 				//保存原本的参数符信息,并增加LIMIT
-				originalSql = getLimitSql(originalSql,rowBounds);
-				metaStatementHandler.setValue("delegate.boundSql.sql", originalSql);	
+				String newSql = getLimitSql(originalSql,pageLimitBounds);
+				metaStatementHandler.setValue("delegate.boundSql.sql", newSql);	
 				metaStatementHandler.setValue("delegate.boundSql",boundSql);
+				
+				//异步线程获取分页数据s
 				return invocation.proceed();
 			}else {
 				if(LOGGER.isDebugEnabled()) {
@@ -69,30 +95,17 @@ public class PageLimitInterceptor implements Interceptor {
 			throw new Exception("sql is not allow null");
 		}
 	}
-	
 
 	/**
 	 * 增加LIMIT分页
 	 * @param sql
 	 * @return
 	 */
-	private String getLimitSql(String sql,RowBounds rowBounds) {
-		//先把最后面的分号去掉
-		while(true) {
-			if(sql.lastIndexOf(";")>-1) {
-				sql = sql.substring(0, sql.length()-1);
-			}else {
-				break;
-			}
-		}
-		PageLimitBounds pageLimitBounds = null;
-		if(rowBounds!=null && rowBounds instanceof PageLimitBounds) {
-			pageLimitBounds = (PageLimitBounds) rowBounds;
-		}
+	private String getLimitSql(String sql,PageLimitBounds pageLimitBounds) {
 		StringBuilder newSql = new StringBuilder();
 		newSql.append(sql);
 		if(pageLimitBounds!=null) {
-			int page = pageLimitBounds.getPage()<1?0:pageLimitBounds.getPage()-1;
+			int page = pageLimitBounds.getPage()<1?0:(pageLimitBounds.getPage()-1)*pageLimitBounds.getLimit();
 			newSql.append(" limit ").append(page).append(",").append(pageLimitBounds.getLimit()).append(" ");
 		}
 		return newSql.toString();
@@ -113,5 +126,4 @@ public class PageLimitInterceptor implements Interceptor {
 	public void setProperties(Properties properties) {
 
 	}
-
 }
