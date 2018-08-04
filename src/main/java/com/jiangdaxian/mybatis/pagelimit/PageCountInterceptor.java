@@ -53,31 +53,38 @@ public class PageCountInterceptor implements Interceptor {
 			final Object parameter = queryArgs[1];
 			final RowBounds rowBounds = (RowBounds) queryArgs[2];
 			
-			boolean isSelectTotalCount =false;
-			PageLimitBounds pageLimitBounds = null;
-			if(rowBounds!=null && rowBounds instanceof PageLimitBounds) {
-				pageLimitBounds = (PageLimitBounds) rowBounds;
-				if(pageLimitBounds.isContainsTotalCount()) {
-					isSelectTotalCount = true;
+			if(ms.getSqlCommandType().equals(SqlCommandType.SELECT)==true){
+				boolean isSelectTotalCount =false;
+				PageLimitBounds pageLimitBounds = null;
+				if(rowBounds!=null && rowBounds instanceof PageLimitBounds) {
+					pageLimitBounds = (PageLimitBounds) rowBounds;
+					if(pageLimitBounds.isContainsTotalCount()) {
+						isSelectTotalCount = true;
+					}
 				}
-			}
-			if (isSelectTotalCount) {
-				final BoundSql boundSql = ms.getBoundSql(parameter);
-				final String countSql = boundSql.getSql();
-				Integer count = getCountSql(countSql, ms,boundSql);
-				Object resultObject =  invocation.proceed();
-				if(resultObject!=null && resultObject instanceof List<?>) {
-					List<?> resultList = (List<?>) resultObject;
-					PageList pageList = new PageList();
-					pageList.addAll(resultList);
-					pageList.setPage(pageLimitBounds.getPage());
-					pageList.setLimit(pageLimitBounds.getLimit());
-					pageList.setTotalCount(count);
-					return pageList;
+				if (isSelectTotalCount) {
+					final BoundSql boundSql = ms.getBoundSql(parameter);
+					final String countSql = boundSql.getSql();
+					Integer count = getCountSql(countSql, ms,boundSql);
+					Object resultObject =  invocation.proceed();
+					if(resultObject!=null && resultObject instanceof List<?>) {
+						List<?> resultList = (List<?>) resultObject;
+						PageList pageList = new PageList();
+						pageList.addAll(resultList);
+						pageList.setPage(pageLimitBounds.getPage());
+						pageList.setLimit(pageLimitBounds.getLimit());
+						pageList.setTotalCount(count);
+						return pageList;
+					}else {
+						return resultObject;
+					}
 				}else {
-					return resultObject;
+					return invocation.proceed();
 				}
 			}else {
+				if(LOGGER.isDebugEnabled()) {
+					LOGGER.debug("非查询sql,无需分页，直接操作");
+				}
 				return invocation.proceed();
 			}
 		}catch(Exception e) {
